@@ -1,0 +1,19 @@
+# Foldere mari de ignorat
+models/
+semeval26/
+data/
+env/
+venv/
+EmotionValArouTimeVariation2026/
+
+# Extensii de fisiere mari
+*.safetensors
+*.pt
+*.bin
+*.dylib
+
+# Fisiere sistem
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
