@@ -243,8 +243,7 @@ def main():
         ra = pearson_safe(ga, pa)
         return rv, ra, float(np.nanmean([rv, ra]))
 
-    # --- TRAINING LOOP ---
-    print("\n🚀 Start Training (Chained Bi-GRU)...")
+    print("\n Start Training (Chained Bi-GRU)...")
     for ep in range(1, args.epochs + 1):
         model.train()
         tr_losses = []
@@ -260,7 +259,6 @@ def main():
             lv = nn.functional.smooth_l1_loss(pred_v, gold_v, reduction='none')[M].mean()
             la = nn.functional.smooth_l1_loss(pred_a, gold_a, reduction='none')[M].mean()
 
-            # Păstrăm ponderarea
             loss = 1.0 * lv + 1.5 * la 
             loss.backward()
             opt.step()

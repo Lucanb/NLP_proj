@@ -94,7 +94,7 @@ class DebertaValenceSOTA(nn.Module):
         except Exception:
             pass
 
-        # Optional: freeze bottom layers (0 = none). Helps MPS memory.
+        # Optional: freeze bottom layers. Helps MPS memory.
         if freeze_layers > 0:
             self._freeze_bottom_layers(freeze_layers)
 
@@ -184,7 +184,6 @@ def main():
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--wd", type=float, default=0.01)
 
-    # MPS-safe defaults
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--grad_accum", type=int, default=16)
     ap.add_argument("--eval_batch", type=int, default=2)

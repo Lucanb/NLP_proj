@@ -122,9 +122,9 @@ def main():
     sys.path.append(args.eval_repo)
     try:
         import eval as official_eval
-        print(f"✅ Evaluator oficial încărcat din: {args.eval_repo}")
+        print(f"Evaluator oficial încărcat din: {args.eval_repo}")
     except ImportError as e:
-        print(f"❌ Eroare critică: Nu pot importa 'eval.py'. Verifică calea. ({e})")
+        print(f"Eroare critică: Nu pot importa 'eval.py'. Verifică calea. ({e})")
         sys.exit(1)
 
     if args.disable_mps_watermark:
@@ -152,23 +152,23 @@ def main():
 
     n = len(df)
     if n < 10:
-        print(f"⚠️ Ai doar {n} exemple după filtrare. CV poate fi instabil.")
+        print(f"Ai doar {n} exemple dupa filtrare. CV poate fi instabil.")
 
     if use_groups:
         groups = df[args.group_col].values
         unique_groups = np.unique(groups)
         if len(unique_groups) < 2:
-            raise ValueError(f"Prea puține grupuri în '{args.group_col}' (ai {len(unique_groups)}).")
+            raise ValueError(f"Prea putine grupuri în '{args.group_col}' (ai {len(unique_groups)}).")
         if len(unique_groups) < args.cv_folds:
             args.cv_folds = max(2, len(unique_groups))
-            print(f"⚠️ Prea puțini useri pentru folds; setez cv_folds={args.cv_folds}")
+            print(f" Prea putini useri pentru folds; setez cv_folds={args.cv_folds}")
         splitter = GroupKFold(n_splits=args.cv_folds)
         folds = list(splitter.split(np.zeros(n), groups=groups))
-        print(f"✅ GroupKFold cu {args.cv_folds} folds pe '{args.group_col}'")
+        print(f" GroupKFold cu {args.cv_folds} folds pe '{args.group_col}'")
     else:
         splitter = KFold(n_splits=args.cv_folds, shuffle=True, random_state=args.seed)
         folds = list(splitter.split(np.zeros(n)))
-        print(f"⚠️ Nu am '{args.group_col}' în CSV. Folosesc KFold({args.cv_folds}) random.")
+        print(f" Nu am '{args.group_col}' în CSV. Folosesc KFold({args.cv_folds}) random.")
 
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -243,13 +243,13 @@ def main():
             compute_metrics=compute_metrics,
         )
 
-        print("\n🚀 Începe antrenarea...")
+        print("\n Incepe antrenarea...")
         trainer.train()
 
         eval_metrics = trainer.evaluate()
         all_fold_metrics.append({"fold": fold_i, **eval_metrics})
 
-        print("\n📊 Generare predicții pe setul de validare (fold)...")
+        print("\n Generare predictii pe setul de validare (fold)...")
         pred_output = trainer.predict(val_ds)
         preds = np.asarray(pred_output.predictions)
 
@@ -278,7 +278,7 @@ def main():
             with open(os.path.join(fold_out, "official_metrics.json"), "w") as f:
                 json.dump({"official_valence": res_v, "official_arousal": res_a}, f, indent=2)
         except Exception as e:
-            print(f"⚠️ Eroare la rularea scriptului oficial pe fold {fold_i}: {e}")
+            print(f"Eroare la rularea scriptului oficial pe fold {fold_i}: {e}")
 
         fold_csv = os.path.join(fold_out, "oof_val_predictions.csv")
         pd.DataFrame({
@@ -303,7 +303,6 @@ def main():
     print(f"Pearson Arousal:  {ra:.4f}")
     print(f"Pearson Mean:     {mean_score:.4f}")
 
-    # Optional: scor "oficial" pe OOF (dacă funcția e generică și acceptă input)
     official_oof = {}
     try:
         ids_all = df["text_id"].astype(str).tolist()
@@ -314,7 +313,7 @@ def main():
         print("Valence:", res_v)
         print("Arousal:", res_a)
     except Exception as e:
-        print("\n⚠️ Official eval on OOF failed:", e)
+        print("\n Official eval on OOF failed:", e)
 
     summary_path = os.path.join(args.outdir, "cv_summary.json")
     with open(summary_path, "w") as f:
@@ -338,8 +337,8 @@ def main():
         "text": df["text"].values
     }).to_csv(oof_path, index=False)
 
-    print(f"\n✅ CV summary: {summary_path}")
-    print(f"✅ OOF preds:  {oof_path}")
+    print(f"\n CV summary: {summary_path}")
+    print(f" OOF preds:  {oof_path}")
 
     tok.save_pretrained(args.outdir)
 

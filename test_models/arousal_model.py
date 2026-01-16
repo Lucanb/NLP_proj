@@ -211,7 +211,6 @@ def main():
     ap.add_argument("--save_best", action="store_true")
     ap.add_argument("--no_pearson", action="store_true")
 
-    # memory/perf knobs
     ap.add_argument("--gru_hidden", type=int, default=64)
     ap.add_argument("--freeze_layers", type=int, default=6)
 
@@ -312,7 +311,6 @@ def main():
             dataloader_drop_last=False,
             dataloader_num_workers=0,
 
-            # IMPORTANT on MPS: don't try fp16/bf16
             fp16=False,
             bf16=False,
         )

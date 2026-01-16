@@ -11,7 +11,6 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from scipy.stats import pearsonr
 
-# --- 0. UTILS & DETERMINISM ---
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -33,7 +32,6 @@ def get_device():
     if torch.cuda.is_available(): return torch.device("cuda")
     return torch.device("cpu")
 
-# --- 1. DATA PREP (7 FEATURES - FE AVANSAT) ---
 def build_sequences(df):
     seqs = []
     df = df.sort_values(["user_id", "timestamp"]).copy()
@@ -42,27 +40,23 @@ def build_sequences(df):
         g = g.sort_values("timestamp").reset_index(drop=True)
         if len(g) < 2: continue
 
-        # 1. Delta Time (Log-scaled)
         ts = g["timestamp"].astype("int64") // 10**9
         dt = ts.diff().fillna(0).astype(np.float32).values
         dt_feat = np.log1p(np.clip(dt / (3600.0 * 24.0), 0, 3650)).astype(np.float32)
 
-        # 2. Volatilitatea Valenței
         v_diff = g["pred_valence"].diff().fillna(0).astype(np.float32).values
         
-        # 3. Ora Ciclică
         hour = g["timestamp"].dt.hour.astype(np.float32).values
         hour_sin = np.sin(2 * np.pi * hour / 24.0)
 
-        # X Stack: 7 Dimensiuni
         x = np.stack([
-            g["pred_valence"].astype(np.float32).values, # 0
-            g["pred_arousal"].astype(np.float32).values, # 1
-            dt_feat,                                     # 2
-            g["collection_phase"].astype(np.float32).values / 7.0, # 3
-            g["is_words"].astype(np.float32).values,      # 4
-            v_diff,                                      # 5 (Volatilitate)
-            hour_sin                                     # 6 (Ora)
+            g["pred_valence"].astype(np.float32).values,
+            g["pred_arousal"].astype(np.float32).values,
+            dt_feat,                                     
+            g["collection_phase"].astype(np.float32).values / 7.0,
+            g["is_words"].astype(np.float32).values,      
+            v_diff,                                      
+            hour_sin                                     
         ], axis=1)
 
         y = np.stack([
@@ -90,13 +84,13 @@ def collate_pad(batch):
 
     X = torch.zeros((len(xs), max_l, feat_dim), dtype=torch.float32)
     Y = torch.zeros((len(ys), max_l, 2), dtype=torch.float32)
-    M = torch.zeros((len(xs), max_l), dtype=torch.bool) # False = Padding (logic inversat pt GRU maskare manuală)
+    M = torch.zeros((len(xs), max_l), dtype=torch.bool)
 
     for i, (x, y) in enumerate(zip(xs, ys)):
         L = x.shape[0]
         X[i, :L] = x
         Y[i, :L] = y
-        M[i, :L] = True # True = Data reală
+        M[i, :L] = True
 
     return X, Y, M, lens, metas
 
@@ -105,7 +99,7 @@ class ChainedBiGRU(nn.Module):
     def __init__(self, in_dim=7, hid=64, layers=1, dropout=0.25):
         super().__init__()
         
-        # GRU Bidirecțional
+        # GRU Bidirectional
         self.gru = nn.GRU(
             input_size=in_dim,
             hidden_size=hid,
@@ -118,7 +112,7 @@ class ChainedBiGRU(nn.Module):
         gru_out_dim = hid * 2
         self.drop = nn.Dropout(dropout)
         
-        # Head Valență
+        # Head Valence
         self.head_valence = nn.Sequential(
             nn.Linear(gru_out_dim, hid),
             nn.GELU(),
@@ -126,7 +120,7 @@ class ChainedBiGRU(nn.Module):
             nn.Linear(hid, 1)
         )
         
-        # Head Arousal (Primește Output GRU + Predicția Valență)
+        # Head Arousal
         self.head_arousal = nn.Sequential(
             nn.Linear(gru_out_dim + 1, hid), 
             nn.GELU(),
@@ -142,13 +136,13 @@ class ChainedBiGRU(nn.Module):
         
         out = self.drop(out)
         
-        # 1. Prezicem Valența
+        # 1. Prezicem Valence
         pred_v = self.head_valence(out)
         
-        # 2. Înlănțuim (Chain): Concatenăm Valența la output-ul GRU
+        # 2. Inlantuim (Chain): Concatenăm Valence la output-ul GRU
         aro_input = torch.cat([out, pred_v], dim=2) 
         
-        # 3. Prezicem Arousal folosind contextul + valența
+        # 3. Prezicem Arousal folosind contextul + valence
         pred_a = self.head_arousal(aro_input)
         
         return torch.cat([pred_v, pred_a], dim=2)
@@ -166,13 +160,12 @@ def main():
     ap.add_argument("--hid", type=int, default=64)
     ap.add_argument("--layers", type=int, default=1)
     ap.add_argument("--dropout", type=float, default=0.3)
-    ap.add_argument("--top_k", type=int, default=3) # Câte modele păstrăm pentru medie
+    ap.add_argument("--top_k", type=int, default=3)
     args = ap.parse_args()
     
     os.makedirs(args.outdir, exist_ok=True)
     device = get_device()
     
-    # Load Data
     print(f"🔄 Loading data: {args.data}")
     df = pd.read_csv(args.data)
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
@@ -209,14 +202,12 @@ def main():
                 opt.zero_grad()
                 P = model(X, lens)
                 
-                # Loss pe datele reale (M=True)
                 pred_v, pred_a = P[M][:,0], P[M][:,1]
                 gold_v, gold_a = Y[M][:,0], Y[M][:,1]
                 
                 loss_v = nn.functional.smooth_l1_loss(pred_v, gold_v)
                 loss_a = nn.functional.smooth_l1_loss(pred_a, gold_a)
                 
-                # Ponderare egală sau ușor spre Arousal (care e mai greu)
                 loss = 1.0 * loss_v + 1.2 * loss_a
                 loss.backward()
                 opt.step()
@@ -236,23 +227,22 @@ def main():
             rv = pearson_safe(np.concatenate(all_gv), np.concatenate(all_pv))
             ra = pearson_safe(np.concatenate(all_ga), np.concatenate(all_pa))
             
-            # Scorul combinat (Media geometrică sau aritmetică)
+            # Scorul combinat
             combined_score = (rv + ra) / 2.0 
 
             if combined_score > best_run_score:
                 best_run_score = combined_score
                 best_run_metrics = (rv, ra)
-                # Salvăm în RAM
+
                 best_run_state = {k: v.cpu() for k, v in model.state_dict().items()}
         
         print(f"[{idx+1}/{len(seeds)}] Seed {seed}: Best Mean r={best_run_score:.4f} (Valence={best_run_metrics[0]:.3f}, Arousal={best_run_metrics[1]:.3f})")
         
-        if best_run_score > 0.30: # Prag minim de decență
+        if best_run_score > 0.30:
             results.append((best_run_score, best_run_metrics[0], best_run_metrics[1], seed, best_run_state))
 
     # --- AGREGATION ---
     print(f"\n📊 Calculare Medie Ensemble (Top {args.top_k})...")
-    # Sortăm după scorul combinat
     results.sort(key=lambda x: x[0], reverse=True)
     top_models = results[:args.top_k]
     
@@ -264,12 +254,9 @@ def main():
     for sc, rv, ra, sd, _ in top_models:
         print(f"  -> Seed {sd} (Mean={sc:.4f} | V={rv:.4f}, A={ra:.4f})")
 
-    # Facem predicții finale (V + A)
     final_pv_sum = None
     final_pa_sum = None
     
-    # Colectăm gold truth (deltas) pentru evaluarea finală a ansamblului
-    # Re-citim din DataLoader
     flat_gold_v = []
     flat_gold_a = []
     
@@ -284,7 +271,6 @@ def main():
     flat_gold_v = np.concatenate(flat_gold_v)
     flat_gold_a = np.concatenate(flat_gold_a)
 
-    # Iterăm prin campioni pentru predicții
     for idx, (_, _, _, _, state) in enumerate(top_models):
         model = ChainedBiGRU(in_dim=7, hid=args.hid, layers=args.layers, dropout=args.dropout).to(device)
         model.load_state_dict(state)
@@ -324,11 +310,9 @@ def main():
     print(f"   Arousal r: {ens_ra:.4f}")
     print(f"   Mean    r: {(ens_rv + ens_ra)/2:.4f}")
 
-    # Reconstruim DataFrame-ul final
     out_rows = []
     cursor = 0
     
-    # Re-iterăm prin validation loader pentru metadate
     with torch.no_grad():
         for _, _, _, _, metas in val_dl:
             for meta in metas:
@@ -340,10 +324,6 @@ def main():
                 meta_out["pred_delta_valence"] = chunk_v
                 meta_out["pred_delta_arousal"] = chunk_a
                 
-                # Punem și gold-ul pentru referință
-                # (Atenție: aici gold e recalculat din Y-ul original în loop-ul anterior, 
-                # dar meta conține valorile absolute. Nu suprascriem gold-ul absolut)
-                # Dacă vrem gold delta, le putem lua din flat_gold_v/a
                 meta_out["gold_delta_valence"] = flat_gold_v[cursor : cursor+L]
                 meta_out["gold_delta_arousal"] = flat_gold_a[cursor : cursor+L]
                 

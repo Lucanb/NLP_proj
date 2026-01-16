@@ -29,7 +29,6 @@ def get_device():
 # --- 2. DATA PREP ---
 def build_sequences(df):
     seqs = []
-    # Sortăm după user și timp pentru a crea secvențe corecte
     df = df.sort_values(["user_id", "timestamp"]).copy()
     
     for uid, g in df.groupby("user_id", sort=False):
@@ -38,18 +37,14 @@ def build_sequences(df):
         if len(g) < 2:
             continue
 
-        # Feature Engineering: Timp relativ (delta t)
         ts = g["timestamp"].astype("int64") // 10**9
         dt = ts.diff().fillna(0).astype(np.float32).values
         dt_days = dt / (3600.0 * 24.0)
-        # Transformare logaritmică pentru a stabiliza variațiile mari de timp
         dt_feat = np.log1p(np.clip(dt_days, 0, 3650)).astype(np.float32)
 
         phase = g["collection_phase"].astype(np.float32).values
         is_words = g["is_words"].astype(np.float32).values
 
-        # INPUT (X): [Pred_V, Pred_A, TimeDelta, Phase, IsWords]
-        # Acestea sunt output-urile de la Task 1 + Metadata temporală
         x = np.stack(
             [
                 g["pred_valence"].astype(np.float32).values,
@@ -61,7 +56,6 @@ def build_sequences(df):
             axis=1,
         )
 
-        # TARGET (Y): State Change (Diferența dintre t+1 și t)
         y = np.stack(
             [
                 g["valence"].shift(-1).values - g["valence"].values,
@@ -70,11 +64,9 @@ def build_sequences(df):
             axis=1,
         ).astype(np.float32)
 
-        # Eliminăm ultima linie (nu are "next" pentru target)
         x = x[:-1, :]
         y = y[:-1, :]
 
-        # Păstrăm metadatele pentru identificare la evaluare
         meta = g.iloc[:-1][["user_id", "text_id", "timestamp"]].copy()
 
         seqs.append((x, y, meta))
@@ -97,10 +89,9 @@ def collate_pad(batch):
     maxlen = int(lens.max().item())
     feat_dim = xs[0].shape[1]
 
-    # Padding cu zero pentru secvențe de lungimi diferite
     X = torch.zeros((len(xs), maxlen, feat_dim), dtype=torch.float32)
     Y = torch.zeros((len(ys), maxlen, 2), dtype=torch.float32)
-    M = torch.zeros((len(xs), maxlen), dtype=torch.bool) # Mask
+    M = torch.zeros((len(xs), maxlen), dtype=torch.bool)
 
     for i, (x, y) in enumerate(zip(xs, ys)):
         L = x.shape[0]
@@ -115,8 +106,7 @@ class GRURegressor(nn.Module):
     def __init__(self, in_dim=5, hid=64, layers=1, dropout=0.2):
         super().__init__()
         
-        # CORPUL COMUN (Feature Extractor)
-        # Învață contextul temporal indiferent de emoție
+        # CORPUL COMUN
         self.gru = nn.GRU(
             input_size=in_dim,
             hidden_size=hid,
@@ -128,16 +118,13 @@ class GRURegressor(nn.Module):
         self.drop = nn.Dropout(dropout)
         
         # HEAD 1: Specialist în VALENCE
-        # Rețea densă separată care decide doar dacă utilizatorul e fericit/trist
         self.head_valence = nn.Sequential(
             nn.Linear(hid, hid // 2),
-            nn.GELU(),  # Activare modernă (State of the Art)
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hid // 2, 1)
         )
         
-        # HEAD 2: Specialist în AROUSAL
-        # Rețea densă separată care decide doar intensitatea
         self.head_arousal = nn.Sequential(
             nn.Linear(hid, hid // 2),
             nn.GELU(),
@@ -146,15 +133,12 @@ class GRURegressor(nn.Module):
         )
 
     def forward(self, x, lens):
-        # x: [Batch, Time, Feats]
         out, _ = self.gru(x)
         out = self.drop(out)
-        
-        # Ramificăm execuția în două direcții
+
         val_pred = self.head_valence(out)
         aro_pred = self.head_arousal(out)
-        
-        # Re-combinăm rezultatele: [Batch, Time, 2]
+
         return torch.cat([val_pred, aro_pred], dim=2)
 
 # --- 4. MAIN ---
@@ -164,15 +148,14 @@ def main():
     ap.add_argument("--outdir", default="models/st2a_gru_sota")
     ap.add_argument("--eval_repo", required=True, help="Path to semeval2026-task2-eval folder")
 
-    # Hiperparametri optimizați
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--epochs", type=int, default=20)
-    ap.add_argument("--lr", type=float, default=1e-3) # Learning rate stabil
+    ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--batch_users", type=int, default=8)
-    ap.add_argument("--hid", type=int, default=64) # Dimensiune medie (balansată)
+    ap.add_argument("--hid", type=int, default=64)
     ap.add_argument("--layers", type=int, default=1)
     ap.add_argument("--dropout", type=float, default=0.2)
-    ap.add_argument("--weight_decay", type=float, default=1e-4) # Regularizare L2
+    ap.add_argument("--weight_decay", type=float, default=1e-4)
 
     ap.add_argument("--val_users_ratio", type=float, default=0.2)
     ap.add_argument("--num_workers", type=int, default=0)
@@ -254,8 +237,6 @@ def main():
     model = GRURegressor(in_dim=5, hid=args.hid, layers=args.layers, dropout=args.dropout).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     
-    # Notă: Nu mai definim loss_fn global, îl calculăm custom în buclă
-
     best_mean = -1e9
     log_rows = []
 
@@ -273,7 +254,6 @@ def main():
 
                 P = model(X, lens)
                 
-                # Extragem doar valorile valide
                 P_flat = P[M]
                 G_flat = Y[M]
 
@@ -295,7 +275,7 @@ def main():
         return rv, ra, float(np.nanmean([rv, ra]))
 
     # --- ANTRENARE CU WEIGHTED LOSS ---
-    print("\n🚀 Start Training (SOTA Multi-Head)...")
+    print("\n Start Training (SOTA Multi-Head)...")
     for ep in range(1, args.epochs + 1):
         model.train()
         tr_losses = []
@@ -306,23 +286,19 @@ def main():
             M = M.to(device)
 
             opt.zero_grad(set_to_none=True)
-            P = model(X, lens) # Output: (Batch, Time, 2)
+            P = model(X, lens)
 
-            # --- CUSTOM LOSS LOGIC ---
             pred_v = P[:, :, 0]
             pred_a = P[:, :, 1]
             gold_v = Y[:, :, 0]
             gold_a = Y[:, :, 1]
 
-            # Calculăm loss per element
             lv = nn.functional.smooth_l1_loss(pred_v, gold_v, reduction='none')
             la = nn.functional.smooth_l1_loss(pred_a, gold_a, reduction='none')
 
-            # Aplicăm masca (excludem padding-ul)
             lv = lv[M].mean()
             la = la[M].mean()
 
-            # PONDERARE: Dăm prioritate Arousal-ului (x2.0) pentru că e mai greu
             total_loss = 1.0 * lv + 2.0 * la
             
             total_loss.backward()
@@ -330,7 +306,6 @@ def main():
 
             tr_losses.append(float(total_loss.detach().cpu().item()))
 
-        # Validare
         rv, ra, rmean = eval_epoch()
         
         row = {
@@ -350,7 +325,7 @@ def main():
     pd.DataFrame(log_rows).to_csv(os.path.join(args.outdir, "train_log.csv"), index=False)
 
     # --- FINAL PREDICTIONS & OFFICIAL EVAL ---
-    print("\n📊 Generare predicții finale...")
+    print("\n Generare predicții finale...")
     ckpt = torch.load(os.path.join(args.outdir, "best.pt"), map_location=device)
     model.load_state_dict(ckpt["model"])
     model.eval()
@@ -386,10 +361,10 @@ def main():
     pred_df = pd.concat(pred_rows, ignore_index=True) if pred_rows else pd.DataFrame()
     out_csv = os.path.join(args.outdir, "val_st2a_predictions.csv")
     pred_df.to_csv(out_csv, index=False)
-    print(f"✅ CSV final salvat: {out_csv}")
+    print(f" CSV final salvat: {out_csv}")
 
     print("\n" + "="*40)
-    print("🏆 REZULTATE OFICIALE (SOTA ARCHITECTURE)")
+    print(" REZULTATE OFICIALE (SOTA ARCHITECTURE)")
     print("="*40)
     
     try:
@@ -405,7 +380,7 @@ def main():
             json.dump({"valence": res_v, "arousal": res_a}, f, indent=2)
             
     except Exception as e:
-        print(f"⚠️ Eroare evaluare: {e}")
+        print(f" Eroare evaluare: {e}")
 
 if __name__ == "__main__":
     main()

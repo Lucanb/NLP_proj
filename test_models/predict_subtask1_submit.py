@@ -67,8 +67,8 @@ def pick_embedding_key(sd: dict) -> str:
         return cands[0]
 
     raise KeyError(
-        "Nu găsesc cheia embedding-ului în model.safetensors. "
-        "Tipărește primele 50 keys din sd.keys() ca să ajustăm automat."
+        "Nu gasesc cheia embedding-ului în model.safetensors. "
+        "Tipareste primele 50 keys din sd.keys() ca să ajustam automat."
     )
 
 
@@ -180,7 +180,7 @@ def main():
         out.insert(0, "user_id", df["user_id"].tolist())
 
     out.to_csv(args.out_csv, index=False)
-    print("✅ Wrote:", args.out_csv, "rows:", len(out))
+    print(" Wrote:", args.out_csv, "rows:", len(out))
 
 
 if __name__ == "__main__":

@@ -359,7 +359,7 @@ def main():
         out = out[["text_id", "pred_valence", "pred_arousal"]]
 
     out.to_csv(args.out_csv, index=False)
-    print("✅ Wrote:", args.out_csv, "rows:", len(out))
+    print("Wrote:", args.out_csv, "rows:", len(out))
 
 
 if __name__ == "__main__":
